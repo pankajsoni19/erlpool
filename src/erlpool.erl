@@ -15,8 +15,10 @@
     stop_group/1,
     restart_group/1,
     pid/1,
+    sticky_pid/2,
     map/2,
-    pool_size/1
+    pool_size/1,
+    add_worker/1
 ]).
 
 -spec start() -> ok  | {error, any()}.
@@ -49,14 +51,14 @@ start_pool(PoolName, PoolArgs) ->
 stop_pool(PoolName) ->
     erlpool_manager:rem_pool(PoolName).
 
--spec restart_pool(atom()) -> boolean() | {error, any()}.
+-spec restart_pool(atom()) -> boolean().
 
 restart_pool(PoolName) ->
-    case whereis(erlpool_pool_sup:name(PoolName)) of
-        undefined ->
-            false;
-        Pid ->
-            exit(Pid, kill)
+    case erlpool_sup:restart_pool(PoolName) of
+        {ok, _} ->
+            true;
+        _ ->
+            false
     end.
 
 -spec stop_group(term()) -> ok | {error, any()}.
@@ -82,6 +84,22 @@ pid(PoolName) ->
             try
                 N = ets:update_counter(PoolName, sq, {2, 1, PoolSize, 1}),
                 [{N, Worker}] = ets:lookup(PoolName, N),
+                Worker
+            catch
+                _:Error ->
+                    {error, Error}
+            end;
+        Error ->
+            Error
+    end.
+
+-spec sticky_pid(atom(), non_neg_integer()) -> pid() | {error, any()}.
+
+sticky_pid(PoolName, KeyHash) ->
+    case ?POOL_SIZE(PoolName) of
+        {ok, PoolSize} ->
+            try
+                [{_, Worker}] = ets:lookup(PoolName, KeyHash rem PoolSize + 1),
                 Worker
             catch
                 _:Error ->
@@ -123,3 +141,8 @@ pool_size(PoolName) ->
         Error ->
             Error
     end.
+
+-spec add_worker(atom()) -> ok | {error, any()}.
+
+add_worker(PoolName) ->
+    erlpool_manager:add_worker(PoolName).

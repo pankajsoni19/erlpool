@@ -4,25 +4,28 @@
 
 -export([compile_settings/1]).
 
+-include_lib("syntax_tools/include/merl.hrl").
+
 compile_settings(SettingsList) ->
-    code:purge(?GLOBALS_MODULE),
-    case dynamic_compile:load_from_string(get_settings_code(SettingsList)) of
-        {module, ?GLOBALS_MODULE} ->
+    Forms = get_settings_code(SettingsList),
+    %% for deubgging only
+    % file:write_file("/tmp/erlpool_globals_gen.erl", erl_prettypr:format(erl_syntax:form_list(Forms))),
+    case merl:compile_and_load(Forms) of
+        {ok, _Bin} ->
             ok;
-        Error ->
-            Error
+        Err ->
+            Err
     end.
 
 get_settings_code(SettingsList) ->
-    binary_to_list(get_settings_code(SettingsList, <<>>)).
+    ModuleName = ?GLOBALS_MODULE,
+    Module = ?Q("-module('@ModuleName@')."),
+    Export = ?Q("-export([size/1])."),
+    Function = gen(SettingsList, []),
+    [Module, Export,  Function].
 
-get_settings_code([{PoolName, PoolSize, _PoolGroup}|T], AccBody) ->
-    PoolNameBin = atom_to_binary(PoolName, latin1),
-    PoolSizeBin = integer_to_binary(PoolSize),
-    ModuleFun = <<"size('", PoolNameBin/binary,"') -> {ok, ", PoolSizeBin/binary,"};\n">>,
-    get_settings_code(T, <<AccBody/binary, ModuleFun/binary>>);
-get_settings_code([], AccBody0) ->
-    AccBody = <<AccBody0/binary, "size(_) -> {error, not_found}.\n">>,
-    ModuleBin = atom_to_binary(?GLOBALS_MODULE, latin1),
-    ModuleHeader = <<"-module(", ModuleBin/binary, ").\n -export([size/1]).\n">>,
-    <<ModuleHeader/binary, AccBody/binary>>.
+gen([{Name, Size, _PoolArgs} | R], Acc) ->
+    gen(R, [?Q("(_@Name@) -> {ok, _@Size@}") | Acc]);
+gen([], Acc) ->
+    Clauses = lists:reverse([?Q("(_) -> {error, not_found}") | Acc]),
+    erl_syntax:function(merl:term(size), Clauses).

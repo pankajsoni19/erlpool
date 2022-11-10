@@ -1,10 +1,19 @@
 -module(integrity_test_SUITE).
--author("silviu.caragea").
 
--include_lib("common_test/include/ct.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--compile(export_all).
+-export([
+         all/0,
+         groups/0,
+         init_per_suite/1,
+         end_per_suite/1,
+         test_map/1,
+         test_pid_round_robin/1,
+         test_not_existing_pool/1,
+         test_group/1,
+         test_add_worker/1
+        ]).
+
 
 all() -> [
     {group, erlpool_group}
@@ -15,7 +24,8 @@ groups() -> [
         test_map,
         test_pid_round_robin,
         test_not_existing_pool,
-        test_group
+        test_group,
+        test_add_worker
     ]}
 ].
 
@@ -28,6 +38,8 @@ init_per_suite(Config) ->
 
 end_per_suite(_Config) ->
     ok = erlpool:stop_pool(pool1),
+    %disable info report
+    logger:add_handler_filter(default, ?MODULE, {fun(_,_) -> stop end, nostate}),
     %let pool2 to be destroyed by the app supervisor
     erlpool:stop().
 
@@ -58,24 +70,23 @@ test_not_existing_pool(_Config) ->
     ok.
 
 test_group(_Config) ->
-
-    Args = [{start_mfa, {dummy_worker, start_link, [[]]}}],
-    ok = erlpool:start_pool(gpool1, [{size, 2}, {group, g1} |Args]),
+    Args = [{start_mfa, {dummy_worker, start_link, [[{dummy1, 1}, {dummy2, 2}]]}}],
+    ok = erlpool:start_pool('node_pool1_127.0.0.1_6379', [{size, 2}, {group, g1} |Args]),
     ok = erlpool:start_pool(gpool2, [{size, 3}, {group, g1} |Args]),
     ok = erlpool:start_pool(gpool3, [{size, 4}, {group, g2} |Args]),
     ok = erlpool:start_pool(gpool4, [{size, 5}, {group, g2} |Args]),
 
-    PG1 = whereis(erlpool_pool_sup:name(gpool1)),
+    PG1 = whereis(erlpool_pool_sup:name('node_pool1_127.0.0.1_6379')),
     PG2 = whereis(erlpool_pool_sup:name(gpool2)),
     PG3 = whereis(erlpool_pool_sup:name(gpool3)),
     PG4 = whereis(erlpool_pool_sup:name(gpool4)),
 
-    true = erlpool:restart_pool(gpool1),
+    true = erlpool:restart_pool('node_pool1_127.0.0.1_6379'),
     false = erlpool:restart_pool(gpool5),
 
     timer:sleep(100),
 
-    PG11 = whereis(erlpool_pool_sup:name(gpool1)),
+    PG11 = whereis(erlpool_pool_sup:name('node_pool1_127.0.0.1_6379')),
 
     ?assert(PG11 =/= undefined),
     ?assert(PG11 =/= PG1),
@@ -84,7 +95,7 @@ test_group(_Config) ->
 
     timer:sleep(100),
 
-    NPG1 = whereis(erlpool_pool_sup:name(gpool1)),
+    NPG1 = whereis(erlpool_pool_sup:name('node_pool1_127.0.0.1_6379')),
     NPG2 = whereis(erlpool_pool_sup:name(gpool2)),
     NPG3 = whereis(erlpool_pool_sup:name(gpool3)),
     NPG4 = whereis(erlpool_pool_sup:name(gpool4)),
@@ -98,9 +109,15 @@ test_group(_Config) ->
 
     timer:sleep(100),
 
-    NPG1 = whereis(erlpool_pool_sup:name(gpool1)),
+    NPG1 = whereis(erlpool_pool_sup:name('node_pool1_127.0.0.1_6379')),
     NPG2 = whereis(erlpool_pool_sup:name(gpool2)),
     undefined = whereis(erlpool_pool_sup:name(gpool3)),
     undefined = whereis(erlpool_pool_sup:name(gpool4)),
     ok.
 
+test_add_worker(_Config) ->
+    Size = erlpool:pool_size(pool1),
+    ok = erlpool:add_worker(pool1),
+    NewSize = Size + 1,
+    NewSize = erlpool:pool_size(pool1),
+    ok.

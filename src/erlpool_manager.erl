@@ -7,7 +7,8 @@
     new_pool/2,
     rem_pool/1,
     rem_group/1,
-    get_pools/1
+    get_pools/1,
+    add_worker/1
 ]).
 
 init() ->
@@ -18,8 +19,7 @@ new_pool(PoolName, PoolArgs) ->
     case erlpool_sup:add_pool(PoolName, PoolArgs) of
         {ok, _} ->
             PoolSize  = proplists:get_value(size, PoolArgs),
-            PoolGroup = proplists:get_value(group, PoolArgs, undefined),
-            ets:insert(?POOL_MANAGER_TAB, {PoolName, PoolSize, PoolGroup}),
+            ets:insert(?POOL_MANAGER_TAB, {PoolName, PoolSize, PoolArgs}),
             erlpool_compile:compile_settings(ets:tab2list(?POOL_MANAGER_TAB));
         Error ->
             Error
@@ -36,9 +36,9 @@ rem_pool(PoolName) ->
 
 rem_group(Group) ->
     try
-        RemoveFun = fun({PoolName, _Size, Gp}) ->
-            case Gp =:= Group of
-                true ->
+        RemoveFun = fun({PoolName, _Size, PoolArgs}) ->
+            case proplists:get_value(group, PoolArgs) of
+                Group ->
                     ok = rem_pool(PoolName);
                 _ ->
                     ok
@@ -52,9 +52,9 @@ rem_group(Group) ->
 
 get_pools(Group) ->
     try
-        GetFun = fun({PoolName, _Size, Gp}, Acc) ->
-            case Gp =:= Group of
-                true ->
+        GetFun = fun({PoolName, _Size, PoolArgs}, Acc) ->
+            case proplists:get_value(group, PoolArgs) of
+                Group ->
                     [PoolName|Acc];
                 _ ->
                     Acc
@@ -65,3 +65,24 @@ get_pools(Group) ->
         _: Error ->
             {error, Error}
     end.
+
+add_worker(PoolName) ->
+    try
+        case ets:lookup(?POOL_MANAGER_TAB, PoolName) of
+            [{PoolName, Size, PoolArgs}] ->
+                Id = Size + 1,
+                case erlpool_pool_sup:add_worker(PoolName, Id, PoolArgs) of
+                    {ok, _} ->
+                        ets:update_counter(?POOL_MANAGER_TAB, PoolName, {2, 1}),
+                        erlpool_compile:compile_settings(ets:tab2list(?POOL_MANAGER_TAB));
+                    {error, Reason} ->
+                        {error, Reason}
+                end;
+            _ ->
+                {error, not_found}
+        end
+    catch
+        _: Error ->
+            {error, Error}
+    end.
+
